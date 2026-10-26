@@ -64,6 +64,9 @@ describe('dsh-better-sidebar plugin export shape', () => {
       expect(Config.dict?.[key]?.meta.volatile, key).toBe(true)
     }
     expect(Config.dict?.listLimit?.meta.volatile).not.toBe(true)
+    // The title-entry visibility map is a live preference too: unchecking an
+    // entry must take the volatile-commit path instead of remounting the plugin.
+    expect(Config.dict?.titleEntriesEnabled?.meta.volatile).toBe(true)
   })
 
   it('registers the side card preferences schema with the documented defaults', async () => {
@@ -81,6 +84,10 @@ describe('dsh-better-sidebar plugin export shape', () => {
     // The sidebar-open tool defaults OFF (dormant until the user enables it
     // in the side card settings).
     expect(resolved.agentOpenTools).toBe(false)
+    // The title-entry visibility map resolves to {} — "everything registered
+    // is visible" — so a document that never stored it needs no migration and
+    // an entry that registers later starts visible.
+    expect(resolved.titleEntriesEnabled).toEqual({})
     // customCss (the user-space escape hatch) is declared WITHOUT a schema
     // default — the client's parsePrefs supplies '' — so a document that
     // never stored it resolves without the field.

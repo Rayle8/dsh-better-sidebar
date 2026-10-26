@@ -64,6 +64,20 @@ export interface SidebarPrefs {
    */
   agentOpenTools: boolean
   /**
+   * Per-entry visibility for the controls plugins contribute to the sidebar's
+   * TITLE row (the utilities area at the header's edge), keyed by the entry id
+   * the contributor registered through `ctx.betterSidebar.registerTitleEntry`.
+   *
+   * An ABSENT key means visible — only an explicit `false` hides one, the same
+   * convention `tabsEnabled` / `viewersEnabled` use. That keeps old documents
+   * migration-free and lets a plugin that registers LATER start visible.
+   *
+   * Hiding is a chrome choice, never a capability switch: the entry keeps its
+   * slot registration (it just renders nothing), and the plugin's own tab or
+   * page stays reachable exactly as before.
+   */
+  titleEntriesEnabled: Record<string, boolean>
+  /**
    * Whether the editor tab runs in merged mode: a path input replaces the
    * plain header and a toggleable file-tree panel (with a global name
    * search) docks at the tab's right edge. On by default; also makes brand
@@ -161,6 +175,9 @@ export const SIDEBAR_PREFS_DEFAULTS: SidebarPrefs = {
   mobileNoAutoOpen: true,
   mobileDefaultTree: true,
   agentOpenTools: false,
+  // Empty = every registered entry is visible; the settings list itself is
+  // derived from registrations, so there is nothing to seed here.
+  titleEntriesEnabled: {},
   editorExplorer: false,
   editorGitGutter: true,
   explorerExclude: [...EXPLORER_EXCLUDE_DEFAULTS],

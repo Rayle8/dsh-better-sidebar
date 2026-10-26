@@ -98,8 +98,8 @@ describe('SideCardSection declarative inventory', () => {
     expect(pressedCount(html, 'true')).toBe(3)
     expect(pressedCount(html, 'false')).toBe(0)
     // The custom switches are real checkboxes: the two mobile adaptations are
-    // on by default, agentOpenTools is not.
-    // The two mobile adaptations are on by default.
+    // on by default and agentOpenTools is not. (The sidebar-title group has
+    // no registered entry in this fixture, so it contributes no switch.)
     expect(html.match(/checked=""/g)?.length ?? 0).toBe(2)
     expect(html).not.toContain('Auto-open Subagents')
   })
@@ -126,7 +126,75 @@ describe('SideCardSection declarative inventory', () => {
     store.setPrefs({ ...store.getPrefs(), mobileNoAutoOpen: false, mobileDefaultTree: false })
     const off = renderSection(store, service)
     expect(off).toContain('>Mobile</div>')
+    // Nothing else in this fixture is checked: no title entry is registered,
+    // so that group contributes no switch at all.
     expect(off).not.toContain('checked=""')
+  })
+
+  it('renders the sidebar-title group as an EMPTY state until an entry registers', () => {
+    const { store, service } = mount()
+    const html = renderSection(store, service)
+    // The group is registration-driven: with nothing registered there is no
+    // switch to offer — only the heading (count 0) and the explanation.
+    expect(html).toContain('>Sidebar title</span><span')
+    expect(html).toContain('Nothing to configure yet: entries appear here once a plugin registers one')
+    expect(html, 'no phantom checkbox before registration').not.toContain('aria-label="Context diagnostics"')
+  })
+
+  it('falls back to the control-scoped line when a descriptor brings no description', () => {
+    const { store, service } = mount()
+    // The section cannot know a contributor's page semantics, so the fallback
+    // talks about the CONTROL only — never promises anything about a page.
+    service.registerTitleEntry({ id: 'test-plugin:plain', source: 'test-plugin', title: () => 'Plain entry' })
+    const html = renderSection(store, service)
+    expect(html).toContain('Plain entry')
+    expect(html).toContain('Unchecking hides this control from the sidebar title only')
+    // Every row also prints whose entry it is, so the user can see this
+    // section only mirrors registrations instead of owning them. An owner that
+    // registers itself says nothing about an integrator.
+    expect(html).toContain('From test-plugin')
+    expect(html, 'self-registration must not claim an integrator')
+      .not.toContain('From test-plugin · registered by')
+    expect(html).toContain('These entries are registered by their own plugins')
+    expect(html, 'the fallback must not promise anything about a plugin page')
+      .not.toContain('page itself')
+  })
+
+  it('offers one checkbox per REGISTERED title entry and hides it by id', () => {
+    const { store, service } = mount()
+    const dispose = service.registerTitleEntry({
+      id: 'test-plugin:context-diagnostics',
+      source: 'dsh-context',
+      // dsh-context exposes no service, so this plugin is the integrator that
+      // wires the entry up — the row must say both, never just the integrator.
+      registeredBy: 'dsh-better-sidebar',
+      title: () => 'Context diagnostics',
+      description: () => 'Open the context page for this session',
+    })
+    const html = renderSection(store, service)
+    // The row reads the descriptor the CONTRIBUTOR registered — label,
+    // description, owner and integrator all come from it, nothing hardcoded.
+    expect(html).toContain('Context diagnostics')
+    expect(html).toContain('Open the context page for this session')
+    expect(html).toContain('From dsh-context · registered by dsh-better-sidebar')
+    expect(html).toContain('aria-label="Context diagnostics"')
+    // Absent key = visible, so it starts checked.
+    expect(html.match(/checked=""/g)?.length ?? 0).toBe(3)
+
+    // The user's uncheck writes `titleEntriesEnabled[id] = false`, and the row
+    // follows it without unregistering anything.
+    store.setPrefs({ ...store.getPrefs(), titleEntriesEnabled: { 'test-plugin:context-diagnostics': false } })
+    const off = renderSection(store, service)
+    expect(off).toContain('Context diagnostics')
+    expect(off.match(/checked=""/g)?.length ?? 0).toBe(2)
+    expect(service.isTitleEntryVisible('test-plugin:context-diagnostics')).toBe(false)
+
+    // Withdrawing the registration withdraws the row (and the settings list
+    // goes back to the empty state) — the same call a plugin makes on unload.
+    dispose()
+    const gone = renderSection(store, service)
+    expect(gone).toContain('Nothing to configure yet: entries appear here once a plugin registers one')
+    expect(gone).not.toContain('>Context diagnostics<')
   })
 
   it('renders one small card per registered viewer: icon + title + exts', () => {
@@ -171,7 +239,8 @@ describe('SideCardSection declarative inventory', () => {
     expect(pressedCount(html, 'false')).toBe(2)
     // The explorer card stays pressed.
     expect(pressedCount(html, 'true')).toBe(1)
-    // The two mobile adaptations are on by default.
+    // The two mobile adaptations are on by default (no title entry is
+    // registered in this fixture).
     expect(html.match(/checked=""/g)?.length ?? 0).toBe(2)
   })
 
@@ -193,8 +262,9 @@ describe('SideCardSection declarative inventory', () => {
     expect(html).toContain('aria-label="Custom CSS"')
     expect(html).toContain('data-dsh-bottom-panel')
     expect(html).not.toContain('title-bar')
-    // Three general-row switches remain (agentOpenTools off by default, plus
-    // the two mobile adaptations on) — the removed scheme row was a dropdown.
+    // Three general-row switches (agentOpenTools off by default, the two
+    // mobile adaptations on) — the removed scheme row was a dropdown, and the
+    // sidebar-title group contributes none until an entry registers.
     expect(html.match(/type="checkbox"/g)?.length).toBe(3)
     // The two mobile adaptations are on by default (agentOpenTools is not).
     expect(html.match(/checked=""/g)?.length ?? 0).toBe(2)

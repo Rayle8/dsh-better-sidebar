@@ -9,6 +9,12 @@
  *   absent, or present WITHOUT its keyed tab body, hides all three instead of
  *   offering a dead control), and `busy` disables them all (one open at a
  *   time);
+ * - the sidebar title-row control gates on the GENERIC title-entry visibility
+ *   (`registerTitleEntry` + `titleEntriesEnabled`, one checkbox for every
+ *   plugin's entry): the slot entry stays registered (its order and its
+ *   neighbours never move), renders nothing while unchecked, and follows a
+ *   live flip without a reload — the agent card, the job window and the
+ *   `shell.overlay` alert never depend on that checkbox;
  * - the header control re-checks the session it was drawn for against the
  *   session really on screen (`ctx.sidebarRight.mounted`) at CLICK time: a
  *   header left over from the previous conversation must not navigate;
@@ -171,6 +177,42 @@ describe('registerContextDiagnosticsUI', () => {
 })
 
 describe('the header control', () => {
+  it('is offered while its title entry is visible, retracts live when unchecked, and never touches the alert', async () => {
+    // The control gates on the GENERIC title-entry visibility (the settings
+    // checkbox behind `titleEntriesEnabled`), and the entry stays REGISTERED
+    // either way: order and neighbours never move, it just renders nothing
+    // while hidden — and it comes back without a reload.
+    let enabled = true
+    const listeners = new Set<() => void>()
+    const visibility = {
+      enabled: () => enabled,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+    }
+    const flip = async (next: boolean) => {
+      enabled = next
+      await act(async () => { for (const listener of [...listeners]) listener() })
+    }
+    const fake = makeController({ available: true, busy: false })
+    const slots = makeSlots()
+    const ctx = { ...makeCtx('s1'), slots: slots.slots } as unknown as Context
+    registerContextDiagnosticsUI(ctx, fake.controller, visibility)
+    expect(slots.registrations, 'the entry is registered even while it is hidden')
+      .toHaveLength(2)
+
+    const { container, unmount } = renderRoot(elementOf(slots.registrations))
+    expect(entryButton(container, 'session')).not.toBeNull()
+
+    await flip(false)
+    expect(entryButton(container, 'session')).toBeNull()
+
+    await flip(true)
+    expect(entryButton(container, 'session')).not.toBeNull()
+    unmount()
+  })
+
   it('renders nothing while the capability is unavailable, and appears when it does', async () => {
     const fake = makeController({ available: false, busy: false })
     const slots = makeSlots()

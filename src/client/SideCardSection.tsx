@@ -64,6 +64,7 @@ import type {
   FileViewerDescriptor,
   SidebarSettingsRenderProps,
   SidebarSettingToggle,
+  TitleEntryDescriptor,
   TabDescriptor,
 } from './service.ts'
 import css from './SideCardSection.module.css'
@@ -106,6 +107,26 @@ function tabOrder(a: TabDescriptor, b: TabDescriptor): number {
 /** Viewer inventory order: priority desc (the catch-all `code` comes last). */
 function viewerOrder(a: FileViewerDescriptor, b: FileViewerDescriptor): number {
   return (b.priority ?? 0) - (a.priority ?? 0)
+}
+
+/** Title-row entry order: the descriptor's own order, then registration. */
+function titleEntryOrder(a: TitleEntryDescriptor, b: TitleEntryDescriptor): number {
+  return (a.order ?? 100) - (b.order ?? 100)
+}
+
+/**
+ * One row's attribution line: whose entry it is, plus the integrator when one
+ * package wires up another's capability (this plugin does that for
+ * dsh-context, which exposes no service). Built as ONE string on purpose —
+ * adjacent JSX text nodes would render with React's comment separators and
+ * break the line's readability in the DOM.
+ */
+function sourceLine(entry: TitleEntryDescriptor): string {
+  const owner = t('settingsTitleEntrySource', { source: entry.source })
+  const integrator = entry.registeredBy
+  return integrator === undefined || integrator === entry.source
+    ? owner
+    : `${owner} · ${t('settingsTitleEntryRegisteredBy', { source: integrator })}`
 }
 
 /** Whether a feature declares any secondary settings (gear button shows). */
@@ -660,9 +681,16 @@ export function SideCardSection({ store, service }: SideCardSectionProps) {
   // load/unload — so a plain effect is enough; no external-store ceremony).
   const [tabs, setTabs] = useState<TabDescriptor[]>(() => [...service.getTabs()].sort(tabOrder))
   const [viewers, setViewers] = useState<FileViewerDescriptor[]>(() => [...service.getFileViewers()].sort(viewerOrder))
+  // The title-row entries are a REGISTRATION-driven list: whatever plugins have
+  // contributed so far (none before a capability registers, which is why the
+  // group can legitimately be empty).
+  const [titleEntries, setTitleEntries] = useState<TitleEntryDescriptor[]>(
+    () => [...service.getTitleEntries()].sort(titleEntryOrder),
+  )
   useEffect(() => service.subscribe(() => {
     setTabs([...service.getTabs()].sort(tabOrder))
     setViewers([...service.getFileViewers()].sort(viewerOrder))
+    setTitleEntries([...service.getTitleEntries()].sort(titleEntryOrder))
   }), [service])
 
   // The settings document revision (guards concurrent writes). A ref: commits
@@ -781,6 +809,17 @@ export function SideCardSection({ store, service }: SideCardSectionProps) {
     applyPref({ customCss: raw })
   }
 
+  /**
+   * Flip one title-row entry's visibility. The map is merged from the LATEST
+   * optimistic prefs (never the render-time ones): two same-tick checkbox
+   * writes would otherwise both spread a stale map and drop the earlier id.
+   */
+  const onToggleTitleEntry = (id: string, next: boolean): void => {
+    applyPref({
+      titleEntriesEnabled: { ...optimisticRef.current.titleEntriesEnabled, [id]: next },
+    })
+  }
+
   /** Persist one plugin-owned setting of one descriptor (merged into the pluginSettings blob). */
   const applyPluginSetting = (descriptorId: string, key: string, value: unknown): void => {
     applyPref({ pluginSettings: mergePluginSetting(optimisticRef.current.pluginSettings, descriptorId, key, value) })
@@ -894,6 +933,49 @@ export function SideCardSection({ store, service }: SideCardSectionProps) {
             onChange={(next) => { applyPref({ agentOpenTools: next }) }}
           />
         </div>
+      </div>
+
+      {/* 侧栏标题: the controls plugins contribute to the title row. This list
+          is REGISTRATION-driven — an entry appears only once its plugin has
+          registered it (and disappears with it), so there is never a checkbox
+          for something that does not exist. The empty state says exactly that.
+          Content-agnostic on purpose: no entry id, no plugin name, no feature
+          copy lives here; each row reads the descriptor the contributor
+          registered. The fallback line is deliberately CONTROL-SCOPED ("hides
+          this control"): the section cannot know whether a contributor's page
+          survives being hidden, so that claim belongs in the descriptor's own
+          `description`, not here. Every row also prints the REGISTRANT
+          (`descriptor.source`), because this section only mirrors what plugins
+          registered — it neither owns nor manages those registrations. */}
+      <div className={css.group}>
+        <div className={css.groupHeading}>
+          <span>{t('settingsTitleEntriesTitle')}</span>
+          <span className={css.count}>{titleEntries.length}</span>
+        </div>
+        {titleEntries.length === 0
+          ? <p className={css.hint}>{t('settingsTitleEntriesEmpty')}</p>
+          : <>
+            <p className={css.groupNote}>{t('settingsTitleEntriesIntro')}</p>
+            {titleEntries.map(entry => {
+              const label = textOf(entry.title)
+              return (
+                <div className={css.row} key={entry.id}>
+                  <span className={css.rowText}>
+                    <span className={css.title}>{label}</span>
+                    <span className={css.desc}>
+                      {entry.description === undefined ? t('settingsTitleEntriesDesc') : textOf(entry.description)}
+                    </span>
+                    <span className={css.source}>{sourceLine(entry)}</span>
+                  </span>
+                  <Switch
+                    label={label}
+                    checked={prefs.titleEntriesEnabled[entry.id] !== false}
+                    onChange={(next) => { onToggleTitleEntry(entry.id, next) }}
+                  />
+                </div>
+              )
+            })}
+          </>}
       </div>
 
       {/* 自定义 CSS: the user-space escape hatch. The retired "位置兼容模式"

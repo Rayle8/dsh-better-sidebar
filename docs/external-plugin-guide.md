@@ -56,6 +56,7 @@ better-sidebar 从 v0.4.0 起把自己改造成一个**注册表服务**：
 
 - **新页面（tab）**：注册一种新的侧边栏 tab 类型，出现在侧边栏 `+` 菜单里，用户点击后在自己的分栏里打开你的 React 页面；
 - **文件预览器（file viewer）**：注册一种文件类型预览器，让用户在侧边栏打开文件时走你的渲染组件（覆盖或补充内置的 markdown/html/code）。**宿主自己也有文档预览**——DSH 0.1.7 的 `ui-sidebar-documentpreview` 拿走了表格 / PDF / 图片 / Office 等只读格式，本插件因此**拒绝**认领那些扩展名，你的 viewer 也接不到它们（清单与原因见 §5.4）。
+- **侧栏标题入口（title entry）**：往宿主会话头右端的工具区放一个控件，并自动获得 设置 → 侧边卡片 → 侧栏标题 里的一个可见性勾选项（内容无关，注册即出现、注销即消失，见 §8.3）。
 
 内置的 6 个 tab（editor / git——「Git」统一 tab（Source Control 视角 + 本轮文件视角，Git 视角内含只读提交图）/ subagent / sidechat / terminal-bottom / diff）和 4 个 viewer（markdown / html / jsonl / code）**自己也是通过同一套 API 注册的**（吃自己的狗粮），所以外部插件的能力与内置功能完全对等。**不再内置 terminal / browser 两个 tab 类型**：DSH 0.1.6 自带右列终端（`ui-sidebar-terminal`、kind `terminal`），浏览器是 0.1.6 的 `ui-sidebar-browser`（kind `browser`，**0.1.7 起只在 desktop profile 挂载**，Web profile 没有这个 kind）；插件的同名类型会让读者看到两份实现。同理，0.1.7 的 `ui-sidebar-documentpreview` 让插件的 image / pdf / Office / 表格预览失去意义，那三个 viewer 描述符（image / pdf / binary-download）已删除。
 
@@ -724,6 +725,16 @@ interface BetterSidebarService {
   registerFileViewer(descriptor: FileViewerDescriptor): () => void
   /** 注册自定义文件树/文件 tab 图标（v0.19.0+，features 含 'fileIcons'）；返回 disposer */
   registerFileIcon(descriptor: FileIconDescriptor): () => void
+  /** 往「侧边栏标题」贡献一个控件（features 含 'titleEntries'）；返回 disposer。
+   *  注册即出现在 设置 → 侧边卡片 → 侧栏标题 的勾选清单里，注销即消失；
+   *  同一个 id 重复注册会抛错（先注销）。控件本身由你渲染，用
+   *  isTitleEntryVisible(id) 决定显隐。 */
+  registerTitleEntry(descriptor: TitleEntryDescriptor): () => void
+  /** 当前已注册的侧栏标题条目（注册序） */
+  getTitleEntries(): readonly TitleEntryDescriptor[]
+  /** 某个侧栏标题条目是否可见：titleEntriesEnabled[id] 缺省 = 可见，
+   *  只有显式 false 才隐藏；未注册的 id 一律返回 true。 */
+  isTitleEntryVisible(id: string): boolean
   /** 当前已注册的 tab 描述符快照（同步，供 useSyncExternalStore 用；含被设置页禁用的类型） */
   getTabs(): readonly TabDescriptor[]
   /** 当前已注册的 file viewer 描述符快照（含被设置页禁用的 viewer） */
@@ -1077,6 +1088,46 @@ interface SettingsDescriptor {
 3. **自带设置页的插件要主动退出自动表单**：`ctx.effect(() => ctx.settings.configure({ auto: false }, ctx.fiber))`，否则 Settings 会把同一批字段渲染两遍（策略不影响读写）。
 4. **`settings/document-updated` 你监听不到，别写**：事件签名是 `'settings/document-updated'(ns, revision)`（语义是「该条目的表单值 / 可用性 / 页面策略变了，表单客户端重新读取 schema、解析值与 revision」），但它在 **settings 服务自己的 context 上 `emit`**，而 cordis 事件只向该 ctx 的**祖先**冒泡——插件 fiber 是兄弟，`ctx.on(...)` 永远不会触发。**替代做法：每次重新读取表单时重新求值**（本插件的 `settingsFace.get()` 在返回当前值前跑一遍门控同步；客户端侧另经 `remote` 服务的 `$on('settings/document-updated')` 镜像触发重新拉取）。**旧文档里的 `settings/updated` 事件在 0.1.7 已不存在**。
 
+
+### 8.3 侧栏标题可见性（`titleEntries`，本版新增）
+
+「侧栏标题」指宿主会话头右端的工具区（`conversation.session.header.utilities`），也就是宿主自己
+「打开右侧边栏」按钮所在的角落。想在那个角落放一个控件、并且让用户可以勾选显示/隐藏，走这套
+**注册驱动**的机制，而不是自己加一个偏好字段：
+
+```ts
+// 只在能力真的就绪时注册：注册 = 出现在 设置 → 侧边卡片 → 侧栏标题 的清单里，
+// 注销 = 从清单消失（不会留下一个「拨了没效果」的开关）。
+const dispose = ctx.betterSidebar.registerTitleEntry({
+  id: 'my-plugin:quick-jump',   // 同时是偏好键，务必带命名空间
+  source: 'my-plugin',          // 必填：注册进来的那个包名（设置行会显示「来源」）
+  title: () => 'Quick jump',    // 设置行标题（渲染时求值，可随语言切换）
+  description: () => '在侧栏标题显示快捷跳转按钮',  // 可选，一行说明
+  order: 20,                    // 可选，设置清单内的排序
+})
+
+// 控件自己渲染，显隐读这一条（缺省可见，显式 false 才隐藏）：
+ctx.betterSidebar.isTitleEntryVisible('my-plugin:quick-jump')
+```
+
+要点：
+
+- **内容无关**：可见性只按注册的 `id` 存进 `SidebarPrefs.titleEntriesEnabled`（开放 map，**缺省 = 可见**），
+  设置页不为任何具体入口写代码，也不认识任何插件名。
+- **注册来源必须声明（`source` 必填）**：设置行会打印「来源 <包名>」，分区顶部还有一行说明
+  「这些入口由各插件自行注册；本分区只决定是否显示，不管理注册本身」——用户能一眼看出
+  better-sidebar 只是镜像注册、不拥有这些入口。留空/缺失会**抛错**（宁可 loudly 失败，也不显示一个
+  猜出来的来源）。声明的是**调用 `registerTitleEntry` 的那个包**（例如本插件自己代替 dsh-context
+  注册时会写 `dsh-better-sidebar`，页面归属写在 `description` 里）。
+- **注册后才可配置**：设置清单由 `getTitleEntries()` 驱动，没有注册就没有勾选项（分区显示空态文案）；
+  注销后勾选项一并消失，旧键留在 prefs 里也无害。
+- **隐藏 ≠ 禁用**：宿主 slot 注册保持不变（只是渲染 `null`），控件位置与排序不跳；插件自己的能力
+  （自己的 tab / 页面）不受影响，用户仍可从原来的入口打开。
+- **兜底文案只谈控件**：descriptor 不给 `description` 时，设置行显示的是宿主的通用说明
+  「取消勾选只隐藏该控件」——设置页无从得知你的页面在隐藏后是否还可达，**这句承诺必须由你自己的
+  `description` 来给**（例如「隐藏后仍可从 xxx tab 打开」）。
+- 需要在控件里实时跟随勾选：`useSyncExternalStore(subscribe, () => service.isTitleEntryVisible(id))`，
+  `subscribe` 用 store 的（`store.subscribe` 或 `service.subscribeState` 之一，二者都会在偏好写入后通知）。
 
 ### 8.1 工作区包含检查已移除（v0.23.0，权限放开）
 

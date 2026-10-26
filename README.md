@@ -36,6 +36,8 @@ Switch to **Git Graph** at the top of the Git panel for commit nodes, forks and 
 
 With the `dsh-context` plugin installed, three places offer a one-click jump into that conversation's **Context** view: an agent node's detail card on the Tasks page, a background job's output window (the job's real owner session — never merely the session its row was watched under), and the session header. The entries **appear only** while dsh-context's `Context` page is actually registered: a deployment without it (or with that page hidden) shows no control at all, and while one jump is in flight every entry point is disabled. A failed jump is reported once, in a dismissible alert at the frame's bottom edge; nothing is polled while idle.
 
+Settings has a generic **Sidebar title** section: every plugin that contributes a control to the sidebar title (the utilities area at the session header's right edge) gets a checkbox there — checked shows it, unchecking hides only that control. The list is registration-driven: no registration, no checkbox; it appears as soon as a plugin registers one and disappears with it (no plugin is hardcoded). Each row prints its **registration source** (the package name the contributor declares), and the section states that these entries are registered by their own plugins and that it only decides whether to show them. A row's explanation comes from the contributor first; without one, the host only says that the checkbox hides this control and makes no promise about the plugin's page. Everything starts visible; the field is `titleEntriesEnabled` (open map, absent = visible).
+
 ## 🚀 Installation
 
 ```sh

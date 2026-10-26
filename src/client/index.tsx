@@ -20,7 +20,7 @@ import { RenderBoundary } from './RenderBoundary.tsx'
 import { createNativeTabRecords } from './native/tab-adapter.tsx'
 import { registerNativeSurface } from './native/index.ts'
 import { registerBottomToggle } from './sidebar/bottom-toggle.tsx'
-import { ContextDiagnosticsHost, createContextDiagnosticsHost, registerContextDiagnosticsUI } from './context-diagnostics-ui.tsx'
+import { ContextDiagnosticsHost, HEADER_ENTRY_ID, createContextDiagnosticsHost, registerContextDiagnosticsUI } from './context-diagnostics-ui.tsx'
 import { createNativeSurface } from './native/surface.ts'
 import { isTargetAvailable, openInterceptedLink, registerLinkInterception, shouldTakeOverLink } from './link-intercept.ts'
 import { registerImeGuard } from './ime-guard.ts'
@@ -203,7 +203,55 @@ export function apply(ctx: Context): void {
     'dsh-better-sidebar: native right-Sidebar surface',
   )
   ctx.effect(
-    () => registerContextDiagnosticsUI(ctx, diagnostics),
+    // The settings list is REGISTRATION-driven, so the entry is published only
+    // while the capability really offers its page: a deployment without
+    // dsh-context (or with its page unregistered) contributes no row and the
+    // section says there is nothing to configure — no dead switch.
+    () => {
+      let disposeEntry: (() => void) | undefined
+      const sync = (): void => {
+        const wanted = diagnostics.getSnapshot().available
+        if (wanted === (disposeEntry !== undefined)) return
+        if (wanted) {
+          disposeEntry = service.registerTitleEntry({
+            id: HEADER_ENTRY_ID,
+            // The entry BELONGS to dsh-context (its page is what the control
+            // opens), but dsh-context exposes no service, so THIS activation
+            // registers on its behalf. Both facts are shown: the row reads
+            // "source dsh-context, registered by dsh-better-sidebar", which is
+            // how a user sees that this plugin only mirrors registrations.
+            source: 'dsh-context',
+            registeredBy: 'dsh-better-sidebar',
+            title: () => t('contextDiagnostics'),
+            // The generic fallback only speaks about the control itself (it
+            // cannot know a plugin's page semantics), so an entry whose page
+            // really stays reachable says so here.
+            description: () => t('settingsContextDiagnosticsDesc'),
+          })
+        } else {
+          disposeEntry?.()
+          disposeEntry = undefined
+        }
+      }
+      const off = diagnostics.subscribe(sync)
+      sync()
+      return () => {
+        off()
+        disposeEntry?.()
+        disposeEntry = undefined
+      }
+    },
+    'dsh-better-sidebar: context diagnostics title entry',
+  )
+  ctx.effect(
+    () => registerContextDiagnosticsUI(ctx, diagnostics, {
+      // The generic title-row visibility: one checkbox per registered entry,
+      // stored by id under `titleEntriesEnabled`. Read through the store so the
+      // settings checkbox applies live — the entry stays registered and renders
+      // nothing while hidden.
+      enabled: () => service.isTitleEntryVisible(HEADER_ENTRY_ID),
+      subscribe: listener => sidebarStore.subscribe(listener),
+    }),
     'dsh-better-sidebar: context diagnostics surfaces',
   )
   // The controller holds a child fiber (its runtime-face integration) and a

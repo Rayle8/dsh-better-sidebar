@@ -593,6 +593,82 @@ describe('service.openTab auto-expand for content opens', () => {
   })
 })
 
+describe('title-row entry registry', () => {
+  const descriptor = (id: string) => ({ id, source: 'test-plugin', title: () => id })
+
+  it('registers, lists and withdraws entries (the disposer is the only way out)', () => {
+    const service = createBetterSidebarService(createSidebarStore())
+    expect(service.getTitleEntries()).toEqual([])
+    const dispose = service.registerTitleEntry(descriptor('a:one'))
+    expect(service.getTitleEntries().map(entry => entry.id)).toEqual(['a:one'])
+    // The registrant travels with the descriptor: the settings row prints it,
+    // which is how a user sees that this plugin only mirrors registrations.
+    expect(service.getTitleEntries()[0]?.source).toBe('test-plugin')
+    // Registering the same id twice is a programming error, not a silent
+    // overwrite (two plugins must not fight over one preference key).
+    expect(() => service.registerTitleEntry(descriptor('a:one'))).toThrow(/already registered/)
+    dispose()
+    expect(service.getTitleEntries()).toEqual([])
+    // The second disposer call is a no-op (idempotent teardown on unload).
+    dispose()
+    expect(service.getTitleEntries()).toEqual([])
+  })
+
+  it('refuses an entry that does not declare its source package', () => {
+    const service = createBetterSidebarService(createSidebarStore())
+    // A blank/absent source is a wiring bug (the row would have to guess whose
+    // entry it is), so it fails loudly instead of rendering "来源 ?".
+    const anonymous = { id: 'a:one', title: () => 'one' } as unknown as Parameters<typeof service.registerTitleEntry>[0]
+    expect(() => service.registerTitleEntry(anonymous)).toThrow(/must declare its source/)
+    const blank = { ...descriptor('a:two'), source: '   ' }
+    expect(() => service.registerTitleEntry(blank)).toThrow(/must declare its source/)
+    expect(service.getTitleEntries()).toEqual([])
+  })
+
+  it('carries the OWNER and the optional integrator apart', () => {
+    // The normal case: the owner registers itself, so nothing says otherwise.
+    const service = createBetterSidebarService(createSidebarStore())
+    service.registerTitleEntry(descriptor('owner:self'))
+    expect(service.getTitleEntries()[0]).toMatchObject({ source: 'test-plugin' })
+    expect(service.getTitleEntries()[0]?.registeredBy).toBeUndefined()
+    // The integrator case: the entry belongs to one package and another one
+    // wired it up (this plugin does that for dsh-context, which has no
+    // service). Both facts survive, so the row can say "owned by X, registered
+    // by Y" instead of implying the owner wired it.
+    service.registerTitleEntry({ ...descriptor('owner:integrator'), source: 'dsh-context', registeredBy: 'dsh-better-sidebar' })
+    const entry = service.getTitleEntries().find(row => row.id === 'owner:integrator')
+    expect(entry).toMatchObject({ source: 'dsh-context', registeredBy: 'dsh-better-sidebar' })
+    // A blank integrator would render "registered by " with nothing after it.
+    expect(() => service.registerTitleEntry({ ...descriptor('owner:blank'), registeredBy: '  ' }))
+      .toThrow(/blank registeredBy/)
+  })
+
+  it('notifies registry listeners so the settings list follows registrations', () => {
+    const service = createBetterSidebarService(createSidebarStore())
+    const seen: number[] = []
+    const off = service.subscribe(() => { seen.push(service.getTitleEntries().length) })
+    const dispose = service.registerTitleEntry(descriptor('a:one'))
+    dispose()
+    off()
+    service.registerTitleEntry(descriptor('b:two'))
+    expect(seen).toEqual([1, 0])
+  })
+
+  it('answers visibility from the prefs map: absent or unknown ids are visible', () => {
+    const store = createSidebarStore()
+    const service = createBetterSidebarService(store)
+    // Before any registration and before any write: visible.
+    expect(service.isTitleEntryVisible('a:one')).toBe(true)
+    service.registerTitleEntry(descriptor('a:one'))
+    expect(service.isTitleEntryVisible('a:one')).toBe(true)
+    // Only an explicit false hides it; true and non-boolean values stay open.
+    store.setPrefs({ ...store.getPrefs(), titleEntriesEnabled: { 'a:one': false, 'x:other': true } })
+    expect(service.isTitleEntryVisible('a:one')).toBe(false)
+    expect(service.isTitleEntryVisible('x:other')).toBe(true)
+    expect(service.isTitleEntryVisible('nobody:registered')).toBe(true)
+  })
+})
+
 describe('version and feature detection (v0.12.0)', () => {
   it('reports the plugin version in lockstep with package.json', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports

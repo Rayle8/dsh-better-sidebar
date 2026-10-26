@@ -69,6 +69,8 @@ function useDiagnosticsSnapshot(store: ContextDiagnostics | undefined): ContextD
 
 const NO_SUBSCRIBE = (): (() => void) => () => {}
 const NO_SNAPSHOT = (): undefined => undefined
+/** The no-preference answer: an un-wired header keeps the pre-switch behaviour. */
+const ALWAYS_ENABLED = (): boolean => true
 
 /**
  * One entry point's control, shared so the three surfaces cannot drift apart:
@@ -113,20 +115,48 @@ export function ContextDiagnosticsButton(props: {
 }
 
 /**
- * The header's control: an entry is drawn for the session the SLOT was mounted
+ * The visibility read any title-row control gates on.
+ *
+ * It is threaded in (instead of the control reaching for a store or the
+ * service) because the control renders in the HOST's tree, whose activation
+ * owns both. Both faces stay stable for the lifetime of one registration,
+ * which is what `useSyncExternalStore` requires: the settings checkbox writes
+ * through the store, the store notifies, and the row re-renders — without
+ * re-registering the slot entry.
+ */
+export interface TitleEntryVisibility {
+  /** Whether this entry is visible right now (the user's checkbox). */
+  enabled(): boolean
+  /** Subscribe to preference changes (same contract as the store's own). */
+  subscribe(listener: () => void): () => void
+}
+
+/** The header's control: an entry is drawn for the session the SLOT was mounted
  * with and can outlive it by a moment while the host rebuilds the row, so the
  * click re-checks `sidebarRight.mounted` and refuses to act once that session
  * left the screen — a stale header must never navigate into the previous
  * conversation.
+ *
+ * This control is registered as a TITLE ENTRY (`ctx.betterSidebar
+ * .registerTitleEntry`), so the settings list owns its visibility checkbox —
+ * one rule for every plugin's title-row control, with no per-feature switch.
+ * Hiding it never touches the agent card's or the job window's entries, nor
+ * dsh-context's own page.
  */
 function ContextDiagnosticsHeader(props: {
   controller: ContextDiagnostics
   sessionId: string
   isCurrent(): boolean
+  visibility?: TitleEntryVisibility
 }): ReactNode {
-  const { controller, sessionId, isCurrent } = props
+  const { controller, sessionId, isCurrent, visibility } = props
   const snapshot = useDiagnosticsSnapshot(controller)
-  if (snapshot?.available !== true) return null
+  const enabled = useSyncExternalStore(
+    visibility?.subscribe ?? NO_SUBSCRIBE,
+    visibility?.enabled ?? ALWAYS_ENABLED,
+    visibility?.enabled ?? ALWAYS_ENABLED,
+  )
+  if (!enabled || snapshot?.available !== true) return null
   const busy = snapshot.busy === true
   return (
     <Button
@@ -201,9 +231,17 @@ export function ContextDiagnosticsAlert(props: { controller: ContextDiagnostics 
  * callback re-runs if one collapses and is re-declared.
  * @param ctx - the client context (slots + the native right column probe).
  * @param controller - the controller of this activation.
+ * @param visibility - the title-entry visibility this control gates on
+ *   (omitted = always visible); the entry stays REGISTERED either way and
+ *   renders nothing while the checkbox is off, so the write is live and the
+ *   row's order never changes.
  * @returns a disposer unregistering both entries.
  */
-export function registerContextDiagnosticsUI(ctx: Context, controller: ContextDiagnostics): () => void {
+export function registerContextDiagnosticsUI(
+  ctx: Context,
+  controller: ContextDiagnostics,
+  visibility?: TitleEntryVisibility,
+): () => void {
   const disposers: Array<() => void> = []
   try {
     disposers.push(ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
@@ -217,6 +255,7 @@ export function registerContextDiagnosticsUI(ctx: Context, controller: ContextDi
         controller,
         sessionId,
         isCurrent: () => mountedSessionId(ctx) === sessionId,
+        ...(visibility === undefined ? {} : { visibility }),
       }),
     }, ContextDiagnosticsHeader)))
     disposers.push(ctx.slots.inject('shell.overlay', () => ctx.slots.register({

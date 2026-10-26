@@ -104,6 +104,10 @@ export const PrefsSchema: z<SidebarPrefs> = z.object({
   // external): an absent key means enabled, so old documents resolve to {}
   // (everything on) with no migration. Non-boolean values fail validation.
   tabsEnabled: z.dict(z.boolean()).default({}),
+  // The same open-map contract for the controls plugins contribute to the
+  // sidebar title row, keyed by their registered entry id: {} = all visible,
+  // and an id that registers later needs no schema or document change.
+  titleEntriesEnabled: z.dict(z.boolean()).default({}),
   viewersEnabled: z.dict(z.boolean()).default({}),
   // Plugin-owned settings blobs (v0.12.0+) are an OPEN nested map: any
   // descriptor id may carry any JSON-serializable values. This is the

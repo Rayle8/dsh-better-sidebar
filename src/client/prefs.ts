@@ -70,6 +70,7 @@ export function parsePrefs(value: unknown): SidebarPrefs {
     agentOpenTools: typeof record.agentOpenTools === 'boolean'
       ? record.agentOpenTools
       : SIDEBAR_PREFS_DEFAULTS.agentOpenTools,
+    titleEntriesEnabled: booleanMapOf(record.titleEntriesEnabled),
     editorExplorer: typeof record.editorExplorer === 'boolean'
       ? record.editorExplorer
       : SIDEBAR_PREFS_DEFAULTS.editorExplorer,

@@ -995,3 +995,27 @@
   color: var(--dsw-alias-state-error-primary);
   padding: 0 2px;
 }
+/* Sidebar title: the empty state ("nothing registered yet") - one quiet line,
+   the same tertiary tone as a row description. */
+.hint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Sidebar title: the one-line note above the rows (this section mirrors
+   registrations, it does not own them) and the registrant line inside a row. */
+.groupNote {
+  margin: 0 0 4px;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.source {
+  font-family: var(--dsw-font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}

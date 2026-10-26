@@ -611,12 +611,81 @@ export interface SidebarSurface {
 }
 
 /**
+ * One control a plugin contributes to the sidebar's TITLE row (the utilities
+ * area at the header's edge, beside the host's own controls).
+ *
+ * This is a REGISTRATION-driven registry: the settings list, and whether the
+ * control is drawn at all, follow what is registered at runtime — a plugin
+ * that is absent, or whose capability is not ready, contributes no entry and
+ * therefore has nothing to configure. No entry id is hardcoded anywhere.
+ *
+ * Visibility is the USER's switch (`titleEntriesEnabled`), not the
+ * contributor's: a registered entry starts visible and the settings list
+ * offers one checkbox per registered id.
+ */
+export interface TitleEntryDescriptor {
+  /**
+   * Stable id, also the preference key. Namespace it
+   * (`'my-plugin:thing'`) so two plugins cannot collide.
+   */
+  id: string
+  /**
+   * The package the entry BELONGS to — whose capability the control opens, in
+   * its npm name (e.g. `'dsh-context'`). Required, and rendered as the row's
+   * source: a user reads it as "this entry comes from that plugin".
+   *
+   * This is NOT necessarily the caller: an integrator may register on another
+   * package's behalf (this plugin does exactly that for dsh-context, which
+   * exposes no service of its own). Declare the OWNER here and the caller in
+   * {@link registeredBy}; never a team or a display name.
+   */
+  source: string
+  /**
+   * The package that actually called `registerTitleEntry`, when it is not the
+   * owner — an integrator standing in for someone else's capability. Optional:
+   * omit it when the owner registers itself (the normal case), and it stays
+   * invisible. Rendered only while it differs from `source`, as
+   * "registered by …", so the row never implies the owner wired it up.
+   */
+  registeredBy?: string
+  /** Localized label for the settings list (read at render time). */
+  title: () => string
+  /**
+   * Optional one-line explanation under the label, for entries whose name
+   * alone does not say what is hidden. This is also where a contributor
+   * states page semantics ("the page stays reachable from …") — the host's
+   * fallback line deliberately never claims anything about a page.
+   */
+  description?: () => string
+  /** Order within the settings list (ascending; ties keep registration order). */
+  order?: number
+}
+
+/**
  * The registry service published as `ctx.betterSidebar`.
  */
 export interface BetterSidebarService {
   registerTab(descriptor: TabDescriptor): () => void
   registerFileViewer(descriptor: FileViewerDescriptor): () => void
   registerFileIcon(descriptor: FileIconDescriptor): () => void
+  /**
+   * Contribute a control to the sidebar's title row AND its settings checkbox.
+   * The returned disposer withdraws both (the row disappears from the settings
+   * list with it). Registering the same id twice throws — withdraw first.
+   *
+   * The contributor owns the rendering: draw the control from
+   * {@link isTitleEntryVisible} so the user's checkbox takes effect live.
+   */
+  registerTitleEntry(descriptor: TitleEntryDescriptor): () => void
+  /** Every registered title-row entry, in registration order. */
+  getTitleEntries(): readonly TitleEntryDescriptor[]
+  /**
+   * Whether one title-row entry is visible. An absent
+   * `titleEntriesEnabled[id]` entry means visible — only an explicit `false`
+   * hides it (an unknown id answers true, so a control never vanishes merely
+   * because its registration raced the preference read).
+   */
+  isTitleEntryVisible(id: string): boolean
   getTabs(): readonly TabDescriptor[]
   getFileViewers(): readonly FileViewerDescriptor[]
   getFileIcons(): readonly FileIconDescriptor[]
@@ -862,6 +931,7 @@ export const SIDEBAR_FEATURES = [
   'rightActions',
   'settingPatterns',
   'hostRouteUrl',
+  'titleEntries',
 ] as const
 
 /** Run one plugin callback; a throw is logged and never breaks the caller. */
@@ -882,6 +952,7 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
   const tabs = new Map<string, TabDescriptor>()
   const viewers = new Map<string, FileViewerDescriptor>()
   const fileIcons = new Map<string, FileIconDescriptor>()
+  const titleEntries = new Map<string, TitleEntryDescriptor>()
   const listeners = new Set<() => void>()
   /** The native right-Sidebar write face, installed by the client half. */
   let surface: SidebarSurface | undefined
@@ -941,6 +1012,40 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
   const getFileViewers = (): readonly FileViewerDescriptor[] => Array.from(viewers.values())
   const getFileIcons = (): readonly FileIconDescriptor[] => Array.from(fileIcons.values())
   const getTab = (id: string): TabDescriptor | undefined => tabs.get(id)
+
+  const registerTitleEntry = (descriptor: TitleEntryDescriptor): (() => void) => {
+    if (titleEntries.has(descriptor.id)) {
+      throw new Error(`[dsh-better-sidebar] title entry "${descriptor.id}" already registered`)
+    }
+    // `source` is REQUIRED: it names the package the entry BELONGS to, which
+    // is what a user reads as "where this came from". A blank one is a wiring
+    // bug, not something to render as a guess.
+    if (typeof descriptor.source !== 'string' || descriptor.source.trim() === '') {
+      throw new Error(`[dsh-better-sidebar] title entry "${descriptor.id}" must declare its source package`)
+    }
+    // `registeredBy` is optional (owner registers itself = the normal case);
+    // when an integrator supplies it, a blank value would render as
+    // "registered by " with nothing after it.
+    if (descriptor.registeredBy !== undefined
+      && (typeof descriptor.registeredBy !== 'string' || descriptor.registeredBy.trim() === '')) {
+      throw new Error(`[dsh-better-sidebar] title entry "${descriptor.id}" has a blank registeredBy package`)
+    }
+    titleEntries.set(descriptor.id, descriptor)
+    notify()
+    return () => {
+      if (titleEntries.get(descriptor.id) === descriptor) {
+        titleEntries.delete(descriptor.id)
+        notify()
+      }
+    }
+  }
+
+  const getTitleEntries = (): readonly TitleEntryDescriptor[] => Array.from(titleEntries.values())
+
+  // Absent = visible (the tabsEnabled/viewersEnabled convention), and an id
+  // nobody registered answers true: a preference read racing the registration
+  // must not make a control flicker out.
+  const isTitleEntryVisible = (id: string): boolean => store.getPrefs().titleEntriesEnabled[id] !== false
 
   const registerFileIcon = (descriptor: FileIconDescriptor): (() => void) => {
     if (fileIcons.has(descriptor.id)) {
@@ -1404,6 +1509,9 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
     registerTab,
     registerFileViewer,
     registerFileIcon,
+    registerTitleEntry,
+    getTitleEntries,
+    isTitleEntryVisible,
     getTabs,
     getFileViewers,
     getFileIcons,

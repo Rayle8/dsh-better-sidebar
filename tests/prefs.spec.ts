@@ -42,6 +42,7 @@ describe('side card preferences', () => {
         mobileNoAutoOpen: true,
         mobileDefaultTree: true,
         agentOpenTools: true,
+        titleEntriesEnabled: {},
         editorExplorer: false,
         editorGitGutter: true,
         explorerExclude: ['.DS_Store', 'Thumbs.db'],
@@ -67,6 +68,7 @@ describe('side card preferences', () => {
         mobileNoAutoOpen: true,
         mobileDefaultTree: true,
         agentOpenTools: false,
+        titleEntriesEnabled: {},
         editorExplorer: false,
         editorGitGutter: true,
         explorerExclude: ['.DS_Store', 'Thumbs.db'],
@@ -92,6 +94,7 @@ describe('side card preferences', () => {
         mobileNoAutoOpen: true,
         mobileDefaultTree: true,
         agentOpenTools: false,
+        titleEntriesEnabled: {},
         editorExplorer: false,
         editorGitGutter: true,
         explorerExclude: ['.DS_Store', 'Thumbs.db'],
@@ -127,6 +130,20 @@ describe('side card preferences', () => {
       expect((await loadPrefs(wire({ [key]: false })))[key], key).toBe(false)
       expect((await loadPrefs(wire({ [key]: true })))[key], key).toBe(true)
     }
+  })
+
+  it('defaults the title-entry map to empty (everything registered is visible)', async () => {
+    // {} means "no entry has been turned off": the settings list itself comes
+    // from registrations, so an old document needs no migration and a plugin
+    // that registers tomorrow is visible without a write.
+    expect((await loadPrefs(wire({}))).titleEntriesEnabled).toEqual({})
+    expect((await loadPrefs(wire({ titleEntriesEnabled: undefined }))).titleEntriesEnabled).toEqual({})
+    // Booleans survive per id; every non-boolean entry is dropped, never
+    // coerced (a string "false" must not hide a control).
+    expect((await loadPrefs(wire({
+      titleEntriesEnabled: { 'a:one': false, 'b:two': true, 'c:bad': 'false', 'd:alsoBad': 0 },
+    }))).titleEntriesEnabled).toEqual({ 'a:one': false, 'b:two': true })
+    expect((await loadPrefs(wire({ titleEntriesEnabled: [] }))).titleEntriesEnabled).toEqual({})
   })
 
   it('defaults both mobile adaptations to on; only an explicit false disarms one', async () => {
